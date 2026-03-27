@@ -1,6 +1,8 @@
-// In-memory data store — works on Vercel serverless.
-// Data resets on cold start, pre-loaded with demo content.
+"use client";
 
+import { v4 as uuidv4 } from "uuid";
+
+// Types
 export interface MemberRow {
   id: string;
   name: string;
@@ -26,13 +28,31 @@ export interface ScheduleRow {
   completed: number;
 }
 
-function now() {
-  return new Date().toISOString().replace("T", " ").slice(0, 19);
+export interface Stats {
+  totalCheckins: number;
+  byCategory: { category: string; count: number }[];
+  byMember: { id: string; name: string; avatar: string; color: string; count: number }[];
+  topTags: { name: string; count: number }[];
+  dailyCounts: { date: string; count: number }[];
+  heatmapData: { member_name: string; date: string; count: number }[];
+  streak: number;
+}
+
+export interface EnrichedCheckin extends CheckinRow {
+  member_name: string;
+  member_avatar: string;
+  member_color: string;
+}
+
+export interface EnrichedSchedule extends ScheduleRow {
+  member_name: string;
+  member_avatar: string;
+  member_color: string;
 }
 
 // ── Seed data ──────────────────────────────────────────────
 
-const demoMembers: MemberRow[] = [
+const SEED_MEMBERS: MemberRow[] = [
   { id: "m1", name: "小明", avatar: "🧑‍💻", color: "#6366f1", created_at: "2025-03-01 00:00:00" },
   { id: "m2", name: "小红", avatar: "👩‍🔬", color: "#ec4899", created_at: "2025-03-01 00:00:00" },
   { id: "m3", name: "小李", avatar: "🧑‍🎨", color: "#f59e0b", created_at: "2025-03-01 00:00:00" },
@@ -40,7 +60,7 @@ const demoMembers: MemberRow[] = [
   { id: "m5", name: "小张", avatar: "🧑‍🏫", color: "#3b82f6", created_at: "2025-03-01 00:00:00" },
 ];
 
-const demoCheckins: CheckinRow[] = [
+const SEED_CHECKINS: CheckinRow[] = [
   { id: "c1",  member_id: "m1", content: "Claude 4 发布了，支持多模态推理和超长上下文窗口，对编程辅助场景提升巨大", category: "news",    tags: '["LLM","Claude","多模态"]',           source_url: "https://anthropic.com", created_at: "2025-03-13 09:00:00" },
   { id: "c2",  member_id: "m2", content: "试用了 Cursor 的 Agent 模式，可以自动读取项目结构并生成代码，效率提升明显", category: "insight", tags: '["AI编程","Cursor","Agent"]',           source_url: "",                      created_at: "2025-03-14 10:30:00" },
   { id: "c3",  member_id: "m3", content: "发现一个有趣的 AI 产品 Gamma，可以用 AI 自动生成精美 PPT，适合快速做汇报", category: "product", tags: '["AI产品","PPT","效率工具"]',            source_url: "https://gamma.app",     created_at: "2025-03-15 14:00:00" },
@@ -76,162 +96,183 @@ function buildSchedule(): ScheduleRow[] {
   return rows;
 }
 
-// ── Store singleton ────────────────────────────────────────
+// ── localStorage helpers ───────────────────────────────────
 
-class Store {
-  members: MemberRow[] = [...demoMembers];
-  checkins: CheckinRow[] = [...demoCheckins];
-  schedule: ScheduleRow[] = buildSchedule();
+const KEYS = {
+  members: "ai-checkin-members",
+  checkins: "ai-checkin-checkins",
+  schedule: "ai-checkin-schedule",
+  initialized: "ai-checkin-initialized",
+};
+
+function load<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function save<T>(key: string, data: T) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+function ensureInitialized() {
+  if (typeof window === "undefined") return;
+  if (localStorage.getItem(KEYS.initialized)) return;
+  save(KEYS.members, SEED_MEMBERS);
+  save(KEYS.checkins, SEED_CHECKINS);
+  save(KEYS.schedule, buildSchedule());
+  localStorage.setItem(KEYS.initialized, "1");
+}
+
+// ── Public API ─────────────────────────────────────────────
+
+export const clientStore = {
+  init() {
+    ensureInitialized();
+  },
 
   // Members
-  getMembers() {
-    return this.members.sort((a, b) => a.created_at.localeCompare(b.created_at));
-  }
+  getMembers(): MemberRow[] {
+    return load<MemberRow[]>(KEYS.members, []).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
 
-  addMember(m: MemberRow) {
-    this.members.push(m);
-  }
+  addMember(m: Omit<MemberRow, "id" | "created_at">) {
+    const members = load<MemberRow[]>(KEYS.members, []);
+    const row: MemberRow = {
+      id: uuidv4(),
+      ...m,
+      created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
+    };
+    members.push(row);
+    save(KEYS.members, members);
+    return row;
+  },
 
-  getMemberById(id: string) {
-    return this.members.find((m) => m.id === id);
-  }
+  getMemberById(id: string): MemberRow | undefined {
+    return load<MemberRow[]>(KEYS.members, []).find((m) => m.id === id);
+  },
 
   // Checkins
-  getCheckins(opts: { limit: number; offset: number; member_id?: string }) {
-    let list = [...this.checkins];
+  getCheckins(opts: { limit: number; offset: number; member_id?: string }): { checkins: EnrichedCheckin[]; total: number } {
+    let list = load<CheckinRow[]>(KEYS.checkins, []);
     if (opts.member_id) list = list.filter((c) => c.member_id === opts.member_id);
     list.sort((a, b) => b.created_at.localeCompare(a.created_at));
     const total = list.length;
     const sliced = list.slice(opts.offset, opts.offset + opts.limit);
-    return { checkins: sliced, total };
-  }
+    const members = load<MemberRow[]>(KEYS.members, []);
+    const enriched = sliced.map((c) => {
+      const m = members.find((mm) => mm.id === c.member_id);
+      return { ...c, member_name: m?.name || "", member_avatar: m?.avatar || "", member_color: m?.color || "" };
+    });
+    return { checkins: enriched, total };
+  },
 
-  addCheckin(c: CheckinRow) {
-    this.checkins.push(c);
+  addCheckin(c: { member_id: string; content: string; category: string; tags: string[]; source_url: string }) {
+    const checkins = load<CheckinRow[]>(KEYS.checkins, []);
+    const row: CheckinRow = {
+      id: uuidv4(),
+      member_id: c.member_id,
+      content: c.content,
+      category: c.category,
+      tags: JSON.stringify(c.tags),
+      source_url: c.source_url,
+      created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
+    };
+    checkins.push(row);
+    save(KEYS.checkins, checkins);
+
     // Mark today's schedule as completed
     const today = new Date().toISOString().split("T")[0];
-    const entry = this.schedule.find((s) => s.member_id === c.member_id && s.date === today);
-    if (entry) entry.completed = 1;
-  }
+    const schedule = load<ScheduleRow[]>(KEYS.schedule, []);
+    const entry = schedule.find((s) => s.member_id === c.member_id && s.date === today);
+    if (entry) {
+      entry.completed = 1;
+      save(KEYS.schedule, schedule);
+    }
 
-  getCheckinById(id: string) {
-    return this.checkins.find((c) => c.id === id);
-  }
+    return row;
+  },
 
   // Schedule
-  getSchedule(from?: string, to?: string) {
-    let list = [...this.schedule];
-    if (from && to) {
-      list = list.filter((s) => s.date >= from && s.date <= to);
-    }
-    return list.sort((a, b) => a.date.localeCompare(b.date));
-  }
-
-  setSchedule(row: ScheduleRow) {
-    const idx = this.schedule.findIndex((s) => s.date === row.date);
-    if (idx >= 0) {
-      this.schedule[idx] = row;
-    } else {
-      this.schedule.push(row);
-    }
-  }
+  getSchedule(from?: string, to?: string): EnrichedSchedule[] {
+    let list = load<ScheduleRow[]>(KEYS.schedule, []);
+    if (from && to) list = list.filter((s) => s.date >= from && s.date <= to);
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    const members = load<MemberRow[]>(KEYS.members, []);
+    return list.map((s) => {
+      const m = members.find((mm) => mm.id === s.member_id);
+      return { ...s, member_name: m?.name || "", member_avatar: m?.avatar || "", member_color: m?.color || "" };
+    });
+  },
 
   // Stats
-  getStats() {
-    const totalCheckins = this.checkins.length;
+  getStats(): Stats {
+    const checkins = load<CheckinRow[]>(KEYS.checkins, []);
+    const members = load<MemberRow[]>(KEYS.members, []);
+    const totalCheckins = checkins.length;
 
-    // By category
     const catMap: Record<string, number> = {};
-    for (const c of this.checkins) {
-      catMap[c.category] = (catMap[c.category] || 0) + 1;
-    }
-    const byCategory = Object.entries(catMap)
-      .map(([category, count]) => ({ category, count }))
-      .sort((a, b) => b.count - a.count);
+    for (const c of checkins) catMap[c.category] = (catMap[c.category] || 0) + 1;
+    const byCategory = Object.entries(catMap).map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
 
-    // By member
     const memMap: Record<string, number> = {};
-    for (const c of this.checkins) {
-      memMap[c.member_id] = (memMap[c.member_id] || 0) + 1;
-    }
-    const byMember = this.members.map((m) => ({
-      id: m.id,
-      name: m.name,
-      avatar: m.avatar,
-      color: m.color,
-      count: memMap[m.id] || 0,
-    })).sort((a, b) => b.count - a.count);
+    for (const c of checkins) memMap[c.member_id] = (memMap[c.member_id] || 0) + 1;
+    const byMember = members.map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, color: m.color, count: memMap[m.id] || 0 })).sort((a, b) => b.count - a.count);
 
-    // Tags
     const tagCounts: Record<string, number> = {};
-    for (const c of this.checkins) {
+    for (const c of checkins) {
       try {
         const tags = JSON.parse(c.tags) as string[];
         for (const t of tags) tagCounts[t] = (tagCounts[t] || 0) + 1;
       } catch { /* skip */ }
     }
-    const topTags = Object.entries(tagCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([name, count]) => ({ name, count }));
+    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([name, count]) => ({ name, count }));
 
-    // Daily counts (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const cutoff = thirtyDaysAgo.toISOString().split("T")[0];
     const dayMap: Record<string, number> = {};
-    for (const c of this.checkins) {
+    for (const c of checkins) {
       const d = c.created_at.split(" ")[0];
       if (d >= cutoff) dayMap[d] = (dayMap[d] || 0) + 1;
     }
-    const dailyCounts = Object.entries(dayMap)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const dailyCounts = Object.entries(dayMap).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Heatmap (last 60 days)
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoff60 = sixtyDaysAgo.toISOString().split("T")[0];
     const heatKey: Record<string, number> = {};
-    for (const c of this.checkins) {
+    for (const c of checkins) {
       const d = c.created_at.split(" ")[0];
       if (d >= cutoff60) {
-        const m = this.getMemberById(c.member_id);
+        const m = members.find((mm) => mm.id === c.member_id);
         if (m) {
-          const key = `${m.name}-${d}`;
+          const key = `${m.name}|||${d}`;
           heatKey[key] = (heatKey[key] || 0) + 1;
         }
       }
     }
     const heatmapData = Object.entries(heatKey).map(([key, count]) => {
-      const [member_name, date] = key.split(/-(.+)/);
+      const [member_name, date] = key.split("|||");
       return { member_name, date, count };
     });
 
-    // Streak
-    const allDates = [...new Set(this.checkins.map((c) => c.created_at.split(" ")[0]))].sort().reverse();
+    const allDates = [...new Set(checkins.map((c) => c.created_at.split(" ")[0]))].sort().reverse();
     let streak = 0;
     const today = new Date();
     for (let i = 0; i < allDates.length; i++) {
       const expected = new Date(today);
       expected.setDate(expected.getDate() - i);
       const expectedStr = expected.toISOString().split("T")[0];
-      if (allDates[i] === expectedStr) {
-        streak++;
-      } else {
-        break;
-      }
+      if (allDates[i] === expectedStr) streak++;
+      else break;
     }
 
     return { totalCheckins, byCategory, byMember, topTags, dailyCounts, heatmapData, streak };
-  }
-}
-
-// Singleton — survives across API calls within the same serverless instance
-const globalStore = globalThis as unknown as { __store?: Store };
-if (!globalStore.__store) {
-  globalStore.__store = new Store();
-}
-
-const store: Store = globalStore.__store;
-export default store;
+  },
+};

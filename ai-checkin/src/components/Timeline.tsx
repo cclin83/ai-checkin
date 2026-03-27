@@ -1,9 +1,10 @@
 "use client";
 
-import { Checkin, CATEGORIES } from "@/lib/types";
+import { CATEGORIES } from "@/lib/types";
+import { EnrichedCheckin } from "@/lib/client-store";
 
 interface Props {
-  checkins: Checkin[];
+  checkins: EnrichedCheckin[];
 }
 
 function formatDate(dateStr: string) {
@@ -31,7 +32,7 @@ export default function Timeline({ checkins }: Props) {
   }
 
   // Group by date
-  const grouped: Record<string, Checkin[]> = {};
+  const grouped: Record<string, EnrichedCheckin[]> = {};
   for (const c of checkins) {
     const date = c.created_at.split("T")[0].split(" ")[0];
     if (!grouped[date]) grouped[date] = [];

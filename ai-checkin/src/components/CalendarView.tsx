@@ -1,9 +1,9 @@
 "use client";
 
-import { ScheduleEntry } from "@/lib/types";
+import { EnrichedSchedule } from "@/lib/client-store";
 
 interface Props {
-  schedule: ScheduleEntry[];
+  schedule: EnrichedSchedule[];
   currentMonth: Date;
   onMonthChange: (date: Date) => void;
 }
@@ -19,7 +19,7 @@ export default function CalendarView({ schedule, currentMonth, onMonthChange }: 
 
   const today = new Date().toISOString().split("T")[0];
 
-  const scheduleMap: Record<string, ScheduleEntry> = {};
+  const scheduleMap: Record<string, EnrichedSchedule> = {};
   for (const s of schedule) {
     scheduleMap[s.date] = s;
   }

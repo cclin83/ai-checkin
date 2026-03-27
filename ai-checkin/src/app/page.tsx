@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Member, Checkin, ScheduleEntry, Stats } from "@/lib/types";
+import { clientStore, MemberRow, EnrichedCheckin, EnrichedSchedule, Stats } from "@/lib/client-store";
 import CheckinForm from "@/components/CheckinForm";
 import Timeline from "@/components/Timeline";
 import CalendarView from "@/components/CalendarView";
@@ -20,61 +20,37 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("checkin");
-  const [members, setMembers] = useState<Member[]>([]);
-  const [checkins, setCheckins] = useState<Checkin[]>([]);
-  const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [checkins, setCheckins] = useState<EnrichedCheckin[]>([]);
+  const [schedule, setSchedule] = useState<EnrichedSchedule[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [ready, setReady] = useState(false);
 
-  const fetchMembers = useCallback(async () => {
-    const res = await fetch("/api/members");
-    const data = await res.json();
-    setMembers(data);
-  }, []);
-
-  const fetchCheckins = useCallback(async () => {
-    const res = await fetch("/api/checkins?limit=50");
-    const data = await res.json();
-    setCheckins(data.checkins);
-  }, []);
-
-  const fetchSchedule = useCallback(async () => {
+  const refreshAll = useCallback(() => {
+    setMembers(clientStore.getMembers());
+    setCheckins(clientStore.getCheckins({ limit: 50, offset: 0 }).checkins);
     const from = new Date();
     from.setDate(from.getDate() - 30);
     const to = new Date();
     to.setDate(to.getDate() + 30);
-    const res = await fetch(
-      `/api/schedule?from=${from.toISOString().split("T")[0]}&to=${to.toISOString().split("T")[0]}`
-    );
-    const data = await res.json();
-    setSchedule(data);
-  }, []);
-
-  const fetchStats = useCallback(async () => {
-    const res = await fetch("/api/stats");
-    const data = await res.json();
-    setStats(data);
+    setSchedule(clientStore.getSchedule(from.toISOString().split("T")[0], to.toISOString().split("T")[0]));
+    setStats(clientStore.getStats());
   }, []);
 
   useEffect(() => {
-    fetchMembers();
-    fetchCheckins();
-    fetchSchedule();
-    fetchStats();
-  }, [fetchMembers, fetchCheckins, fetchSchedule, fetchStats]);
+    clientStore.init();
+    refreshAll();
+    setReady(true);
+  }, [refreshAll]);
 
-  const handleCheckinSubmit = () => {
-    fetchCheckins();
-    fetchSchedule();
-    fetchStats();
-  };
-
-  const handleMemberAdded = () => {
-    fetchMembers();
-  };
+  const handleCheckinSubmit = () => refreshAll();
+  const handleMemberAdded = () => refreshAll();
 
   const today = new Date().toISOString().split("T")[0];
   const todaySchedule = schedule.find((s) => s.date === today);
+
+  if (!ready) return null;
 
   return (
     <div className="min-h-screen flex flex-col">

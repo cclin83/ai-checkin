@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Member, ScheduleEntry } from "@/lib/types";
+import { MemberRow, EnrichedSchedule, clientStore } from "@/lib/client-store";
 
 interface Props {
-  members: Member[];
-  schedule: ScheduleEntry[];
+  members: MemberRow[];
+  schedule: EnrichedSchedule[];
   onMemberAdded: () => void;
 }
 
@@ -23,7 +23,7 @@ export default function TeamView({ members, schedule, onMemberAdded }: Props) {
   const todaySchedule = schedule.find((s) => s.date === today);
 
   // Build upcoming schedule (next 7 days)
-  const upcoming: ScheduleEntry[] = [];
+  const upcoming: EnrichedSchedule[] = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
@@ -32,23 +32,16 @@ export default function TeamView({ members, schedule, onMemberAdded }: Props) {
     if (entry) upcoming.push(entry);
   }
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
     setSubmitting(true);
-    try {
-      await fetch("/api/members", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), avatar, color }),
-      });
-      setName("");
-      setShowForm(false);
-      onMemberAdded();
-    } finally {
-      setSubmitting(false);
-    }
+    clientStore.addMember({ name: name.trim(), avatar, color });
+    setName("");
+    setShowForm(false);
+    setSubmitting(false);
+    onMemberAdded();
   };
 
   return (

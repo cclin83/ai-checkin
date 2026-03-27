@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Member, CATEGORIES } from "@/lib/types";
+import { CATEGORIES } from "@/lib/types";
+import { clientStore, MemberRow } from "@/lib/client-store";
 
 interface Props {
-  members: Member[];
+  members: MemberRow[];
   todayMemberId?: string;
   onSubmit: () => void;
 }
@@ -18,38 +19,31 @@ export default function CheckinForm({ members, todayMemberId, onSubmit }: Props)
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberId || !content.trim()) return;
 
     setSubmitting(true);
-    try {
-      const tags = tagsInput
-        .split(/[,，、\s]+/)
-        .map((t) => t.trim())
-        .filter(Boolean);
+    const tags = tagsInput
+      .split(/[,，、\s]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
 
-      await fetch("/api/checkins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          member_id: memberId,
-          content: content.trim(),
-          category,
-          tags,
-          source_url: sourceUrl.trim(),
-        }),
-      });
+    clientStore.addCheckin({
+      member_id: memberId,
+      content: content.trim(),
+      category,
+      tags,
+      source_url: sourceUrl.trim(),
+    });
 
-      setContent("");
-      setTagsInput("");
-      setSourceUrl("");
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-      onSubmit();
-    } finally {
-      setSubmitting(false);
-    }
+    setContent("");
+    setTagsInput("");
+    setSourceUrl("");
+    setSuccess(true);
+    setSubmitting(false);
+    setTimeout(() => setSuccess(false), 3000);
+    onSubmit();
   };
 
   return (

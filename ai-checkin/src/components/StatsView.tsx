@@ -1,6 +1,7 @@
 "use client";
 
-import { Stats, CATEGORIES } from "@/lib/types";
+import { CATEGORIES } from "@/lib/types";
+import { Stats } from "@/lib/client-store";
 import {
   BarChart,
   Bar,
