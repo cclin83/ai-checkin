@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import db from "@/lib/db";
+import store from "@/lib/store";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET() {
-  const members = db.prepare("SELECT * FROM members ORDER BY created_at").all();
-  return NextResponse.json(members);
+  return NextResponse.json(store.getMembers());
 }
 
 export async function POST(req: NextRequest) {
@@ -16,13 +15,9 @@ export async function POST(req: NextRequest) {
   }
 
   const id = uuidv4();
-  db.prepare("INSERT INTO members (id, name, avatar, color) VALUES (?, ?, ?, ?)").run(
-    id,
-    name,
-    avatar || "🧑",
-    color || "#6366f1"
-  );
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const member = { id, name, avatar: avatar || "🧑", color: color || "#6366f1", created_at: now };
+  store.addMember(member);
 
-  const member = db.prepare("SELECT * FROM members WHERE id = ?").get(id);
   return NextResponse.json(member, { status: 201 });
 }

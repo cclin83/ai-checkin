@@ -1,34 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import db from "@/lib/db";
+import store from "@/lib/store";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const limit = parseInt(searchParams.get("limit") || "50");
   const offset = parseInt(searchParams.get("offset") || "0");
-  const memberId = searchParams.get("member_id");
+  const memberId = searchParams.get("member_id") || undefined;
 
-  let query = `
-    SELECT c.*, m.name as member_name, m.avatar as member_avatar, m.color as member_color
-    FROM checkins c
-    JOIN members m ON c.member_id = m.id
-  `;
-  const params: (string | number)[] = [];
+  const { checkins, total } = store.getCheckins({ limit, offset, member_id: memberId });
 
-  if (memberId) {
-    query += " WHERE c.member_id = ?";
-    params.push(memberId);
-  }
+  const enriched = checkins.map((c) => {
+    const m = store.getMemberById(c.member_id);
+    return { ...c, member_name: m?.name || "", member_avatar: m?.avatar || "", member_color: m?.color || "" };
+  });
 
-  query += " ORDER BY c.created_at DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-
-  const checkins = db.prepare(query).all(...params);
-  const total = db.prepare(
-    `SELECT COUNT(*) as count FROM checkins ${memberId ? "WHERE member_id = ?" : ""}`
-  ).get(...(memberId ? [memberId] : [])) as { count: number };
-
-  return NextResponse.json({ checkins, total: total.count });
+  return NextResponse.json({ checkins: enriched, total });
 }
 
 export async function POST(req: NextRequest) {
@@ -40,20 +27,19 @@ export async function POST(req: NextRequest) {
   }
 
   const id = uuidv4();
-  const tagsJson = JSON.stringify(tags || []);
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
-  db.prepare(
-    "INSERT INTO checkins (id, member_id, content, category, tags, source_url) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, member_id, content, category || "insight", tagsJson, source_url || "");
+  store.addCheckin({
+    id, member_id, content,
+    category: category || "insight",
+    tags: JSON.stringify(tags || []),
+    source_url: source_url || "",
+    created_at: now,
+  });
 
-  // Mark today's schedule as completed
-  const today = new Date().toISOString().split("T")[0];
-  db.prepare("UPDATE schedule SET completed = 1 WHERE member_id = ? AND date = ?").run(member_id, today);
-
-  const checkin = db.prepare(
-    `SELECT c.*, m.name as member_name, m.avatar as member_avatar, m.color as member_color
-     FROM checkins c JOIN members m ON c.member_id = m.id WHERE c.id = ?`
-  ).get(id);
-
-  return NextResponse.json(checkin, { status: 201 });
+  const m = store.getMemberById(member_id);
+  return NextResponse.json({
+    ...store.getCheckinById(id),
+    member_name: m?.name || "", member_avatar: m?.avatar || "", member_color: m?.color || "",
+  }, { status: 201 });
 }

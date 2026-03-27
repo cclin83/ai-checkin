@@ -1,28 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import db from "@/lib/db";
+import store from "@/lib/store";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
+  const from = searchParams.get("from") || undefined;
+  const to = searchParams.get("to") || undefined;
 
-  let query = `
-    SELECT s.*, m.name as member_name, m.avatar as member_avatar, m.color as member_color
-    FROM schedule s
-    JOIN members m ON s.member_id = m.id
-  `;
-  const params: string[] = [];
+  const schedule = store.getSchedule(from, to);
+  const enriched = schedule.map((s) => {
+    const m = store.getMemberById(s.member_id);
+    return { ...s, member_name: m?.name || "", member_avatar: m?.avatar || "", member_color: m?.color || "" };
+  });
 
-  if (from && to) {
-    query += " WHERE s.date >= ? AND s.date <= ?";
-    params.push(from, to);
-  }
-
-  query += " ORDER BY s.date ASC";
-
-  const schedule = db.prepare(query).all(...params);
-  return NextResponse.json(schedule);
+  return NextResponse.json(enriched);
 }
 
 export async function POST(req: NextRequest) {
@@ -34,11 +25,8 @@ export async function POST(req: NextRequest) {
   }
 
   const id = uuidv4();
-  db.prepare("INSERT OR REPLACE INTO schedule (id, member_id, date, completed) VALUES (?, ?, ?, 0)").run(
-    id,
-    member_id,
-    date
-  );
+  const row = { id, member_id, date, completed: 0 };
+  store.setSchedule(row);
 
-  return NextResponse.json({ id, member_id, date, completed: 0 }, { status: 201 });
+  return NextResponse.json(row, { status: 201 });
 }
